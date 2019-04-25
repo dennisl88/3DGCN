@@ -13,9 +13,8 @@ def one_hot(x, allowable_set):
 
 
 class Dataset(object):
-    def __init__(self, dataset, batch=128):
-        self.dataset = dataset
-        self.path = "../../data/{}.sdf".format(dataset)
+    def __init__(self, batch=128):
+        self.path = "../../data/"
         self.task = "binary"
         self.target_name = "active"
         self.max_atoms = 0
@@ -60,60 +59,54 @@ class Dataset(object):
                          use_num_hydrogen=self.use_num_hydrogen)
         self.num_features = mp.get_num_features()
 
-        # Normalize
-        if self.task == "regression":
-            self.mean = np.mean(self.y["train"])
-            self.std = np.std(self.y["train"])
-
-            self.y["train"] = (self.y["train"] - self.mean) / self.std
-            self.y["valid"] = (self.y["valid"] - self.mean) / self.std
-            self.y["test"] = (self.y["test"] - self.mean) / self.std
-        else:
-            self.mean = 0
-            self.std = 1
-
     def load_dataset(self):
-        # Dataset parameters
-        if self.dataset == "bace_reg" or self.dataset == "delaney" or self.dataset == "freesolv":
-            self.task = "regression"
-            self.target_name = "target"
+        # Load files
+        x, ids, c, y = [], [], [], []
 
-        elif self.dataset == "tox21":
-            self.target_name = "NR-ER"
+        n_targets = len(next(os.walk(self.path))[1])
+        for i, target in enumerate(next(os.walk(self.path))[1]):
+            tgt_dir = self.path + target + '/'
+            # TODO: Do something with the target.pdb file
+            with open(tgt_dir + 'actives_final.ism', 'r') as f:
+                lines = f.readlines()
+            lines = [x.strip().split(" ") for x in lines]
+            for smiles, id_ in lines:
+                try:
+                    idx = ids.index(id_)
+                    y[idx][i] = 1
+                except ValueError:
+                    # Optimize molecule with MMFF94
+                    m = Chem.MolFromSmiles(smiles)
+                    m = Chem.AddHs(m)
+                    AllChem.EmbedMolecule(m)
+                    AllChem.MMFFOptimizeMolecule(m)
 
-        # elif self.dataset == "tox21":  # Multitask tox21
-        #     self.target_name = ["NR-Aromatase", "NR-AR", "NR-AR-LBD", "NR-ER", "NR-ER-LBD", "NR-PPAR-gamma", "NR-AhR",
-        #                    "SR-ARE", "SR-ATAD5", "SR-HSE", "SR-MMP", "SR-p53"]
+                    x.append(m)
+                    ids.append(id_)
+                    c.append(m.GetConformer().GetPositions())
+                    y.append([0 for _ in n_targets])
+                    y[-1][i] = 1
 
-        else:
-            pass
+            with open(tgt_dir + 'decoys_final.ism', 'r') as f:
+                lines = f.readlines()
+            lines = [x.strip().split(" ") for x in lines]
+            for smiles, id_ in lines:
+                try:
+                    idx = ids.index(id_)
+                    y[idx][i] = -1
+                except ValueError:
+                    # Optimize molecule with MMFF94
+                    m = Chem.MolFromSmiles(smiles)
+                    m = Chem.AddHs(m)
+                    AllChem.EmbedMolecule(m)
+                    AllChem.MMFFOptimizeMolecule(m)
 
-        # Load file
-        x, c, y = [], [], []
-        mols = Chem.SDMolSupplier(self.path)
-
-        for mol in mols:
-            if mol is not None:
-                # Multitask
-                if type(self.target_name) is list:
-                    y.append([float(mol.GetProp(t)) if t in mol.GetPropNames() else -1 for t in self.target_name])
-                    self.outputs = len(self.target_name)
-
-                # Singletask
-                elif self.target_name in mol.GetPropNames():
-                    _y = float(mol.GetProp(self.target_name))
-                    if _y == -1:
-                        continue
-                    else:
-                        y.append(_y)
-
-                else:
-                    continue
-
-                x.append(mol)
-                c.append(mol.GetConformer().GetPositions())
-        assert len(x) == len(y)
-
+                    x.append(m)
+                    ids.append(id_)
+                    c.append(m.GetConformer().GetPositions())
+                    y.append([0 for _ in n_targets])
+                    y[-1][i] = -1
+            
         # Filter and update maximum number of atoms
         new_x, new_c, new_y = [], [], []
         if self.max_atoms > 0:
@@ -131,10 +124,7 @@ class Dataset(object):
             for mol, tar in zip(x, y):
                 self.max_atoms = max(self.max_atoms, mol.GetNumAtoms())
 
-        if self.task != "regression":
-            self.mols, self.coords, self.target = np.array(x), np.array(c), np.array(y, dtype=int)
-        else:
-            self.mols, self.coords, self.target = np.array(x), np.array(c), np.array(y)
+        self.mols, self.coords, self.target = np.array(x), np.array(c), np.array(y)
 
         # Shuffle data
         idx = np.random.permutation(len(self.mols))

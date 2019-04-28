@@ -68,31 +68,36 @@ class Dataset(object):
         # Load files
         x, c, y = [], [], []
 
-        if self.dataset == None:
+        if self.dataset is None:
             tx, tc = [], []
-            for i, target in enumerate(next(os.walk(self.path))[1]):
-                with open(self.path + target + '/receptor.pdb') as f:
-                    target = rdmolfiles.MolFromPDBFile(f)
-                    targetc = target.GetConformer().GetPositions()
-
+            for i, target_n in enumerate(next(os.walk(self.path))[1]):
+                target = rdmolfiles.MolFromPDBFile(self.path + target_n + '/receptor.pdb')
+                targetc = target.GetConformer().GetPositions()
                 for file, value in (("actives", True), ("decoys", False)):
-                    with open(self.path + target + '/' + file + '_final.ism', 'r') as f:
+                    with open(self.path + target_n + '/' + file + '_final.ism', 'r') as f:
                         lines = f.readlines()
                         lines = [x.strip().split(" ") for x in lines]
-                        for smiles, _, id_ in lines:
-                            # Optimize molecule with MMFF94
-                            m = Chem.MolFromSmiles(smiles)
-                            m = Chem.AddHs(m)
-                            AllChem.EmbedMolecule(m, maxAttempts=5000)
-                            AllChem.MMFFOptimizeMolecule(m)
+                        try:
+                            for smiles, _, id_ in lines:
+                                try:
+                                    # Optimize molecule with MMFF94
+                                    m = Chem.MolFromSmiles(smiles)
+                                    m = Chem.AddHs(m)
+                                    AllChem.EmbedMolecule(m)
+                                    AllChem.MMFFOptimizeMolecule(m)
 
-                            tx.append(target)
-                            tc.append(targetc)
-                            x.append(m)
-                            c.append(m.GetConformer().GetPositions())
-                            y.append(value)
+                                    tx.append(target)
+                                    tc.append(targetc)
+                                    x.append(m)
+                                    c.append(m.GetConformer().GetPositions())
+                                    y.append(value)
+                                except:
+                                    print("Failed to optimize: " + smiles)
+                        except:
+                            import pdb; pdb.set_trace()
                 self.target_size = max([t.GetNumAtoms() for t in tx])
                 self.molecule_size = max([m.GetNumAtoms() for m in x])
+                import pdb; pdb.set_trace()
 
         else:
             for file, value in (("actives", True), ("decoys", False)):
@@ -100,15 +105,18 @@ class Dataset(object):
                     lines = f.readlines()
                     lines = [x.strip().split(" ") for x in lines]
                     for smiles, _, id_ in lines:
-                        # Optimize molecule with MMFF94
-                        m = Chem.MolFromSmiles(smiles)
-                        m = Chem.AddHs(m)
-                        AllChem.EmbedMolecule(m, maxAttempts=5000)
-                        AllChem.MMFFOptimizeMolecule(m)
+                        try:
+                            # Optimize molecule with MMFF94
+                            m = Chem.MolFromSmiles(smiles)
+                            m = Chem.AddHs(m)
+                            AllChem.EmbedMolecule(m)
+                            AllChem.MMFFOptimizeMolecule(m)
 
-                        x.append(m)
-                        c.append(m.GetConformer().GetPositions())
-                        y.append(value)
+                            x.append(m)
+                            c.append(m.GetConformer().GetPositions())
+                            y.append(value)
+                        except:
+                            print("Failed to optimize: " + smiles)
             self.molecule_size = max([m.GetNumAtoms() for m in x])
 
         self.mols, self.coords, self.target = np.array(x), np.array(c), np.array(y)
@@ -131,7 +139,7 @@ class Dataset(object):
                   "valid": self.target[spl2:spl1],
                   "test": self.target[:spl2]}
 
-        if self.dataset == None:
+        if self.dataset is None:
             self.targets, self.t_coords = np.array(tx), np.array(tc)
 
             # Shuffle data

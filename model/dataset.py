@@ -2,7 +2,7 @@ from keras.utils import to_categorical, Sequence
 from rdkit import Chem
 from rdkit.Chem import rdmolops, AllChem
 import numpy as np
-
+import os
 
 def one_hot(x, allowable_set):
     # If x is not in allowed set, use last index
@@ -106,7 +106,7 @@ class Dataset(object):
                     c.append(m.GetConformer().GetPositions())
                     y.append([0 for _ in n_targets])
                     y[-1][i] = -1
-            
+
         # Filter and update maximum number of atoms
         new_x, new_c, new_y = [], [], []
         if self.max_atoms > 0:

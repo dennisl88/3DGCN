@@ -1,6 +1,6 @@
 from keras.utils import to_categorical, Sequence
 from rdkit import Chem
-from rdkit.Chem import rdmolops, AllChem
+from rdkit.Chem import rdmolops, rdmolfiles, AllChem
 import numpy as np
 import os
 
@@ -13,11 +13,16 @@ def one_hot(x, allowable_set):
 
 
 class Dataset(object):
-    def __init__(self, batch=128):
-        self.path = "../../data/"
+    def __init__(self, dataset=None, batch=128):
+        self.dataset = dataset
+        if dataset == None:
+            self.path = "../../data/"
+        else:
+            self.path = "../../data/{0}/".format(dataset)
         self.task = "binary"
         self.target_name = "active"
-        self.max_atoms = 0
+        self.target_size = 0
+        self.molecule_size = 0
 
         self.batch = batch
         self.outputs = 1
@@ -25,7 +30,7 @@ class Dataset(object):
         self.mols = []
         self.coords = []
         self.target = []
-        self.x, self.c, self.y = {}, {}, {}
+        self.tx, self.tc, self.x, self.c, self.y = {}, {}, {}, {}, {}
 
         self.use_atom_symbol = True
         self.use_degree = True
@@ -61,68 +66,50 @@ class Dataset(object):
 
     def load_dataset(self):
         # Load files
-        x, ids, c, y = [], [], [], []
+        x, c, y = [], [], []
 
-        n_targets = len(next(os.walk(self.path))[1])
-        for i, target in enumerate(next(os.walk(self.path))[1]):
-            tgt_dir = self.path + target + '/'
-            # TODO: Do something with the target.pdb file
-            with open(tgt_dir + 'actives_final.ism', 'r') as f:
-                lines = f.readlines()
-            lines = [x.strip().split(" ") for x in lines]
-            for smiles, id_ in lines:
-                try:
-                    idx = ids.index(id_)
-                    y[idx][i] = 1
-                except ValueError:
-                    # Optimize molecule with MMFF94
-                    m = Chem.MolFromSmiles(smiles)
-                    m = Chem.AddHs(m)
-                    AllChem.EmbedMolecule(m)
-                    AllChem.MMFFOptimizeMolecule(m)
+        if self.dataset == None:
+            tx, tc = [], []
+            for i, target in enumerate(next(os.walk(self.path))[1]):
+                with open(self.path + target + '/receptor.pdb') as f:
+                    target = rdmolfiles.MolFromPDBFile(f)
+                    targetc = target.GetConformer().GetPositions()
 
-                    x.append(m)
-                    ids.append(id_)
-                    c.append(m.GetConformer().GetPositions())
-                    y.append([0 for _ in n_targets])
-                    y[-1][i] = 1
+                for file, value in (("actives", True), ("decoys", False)):
+                    with open(self.path + target + '/' + file + '_final.ism', 'r') as f:
+                        lines = f.readlines()
+                        lines = [x.strip().split(" ") for x in lines]
+                        for smiles, _, id_ in lines:
+                            # Optimize molecule with MMFF94
+                            m = Chem.MolFromSmiles(smiles)
+                            m = Chem.AddHs(m)
+                            AllChem.EmbedMolecule(m, maxAttempts=5000)
+                            AllChem.MMFFOptimizeMolecule(m)
 
-            with open(tgt_dir + 'decoys_final.ism', 'r') as f:
-                lines = f.readlines()
-            lines = [x.strip().split(" ") for x in lines]
-            for smiles, id_ in lines:
-                try:
-                    idx = ids.index(id_)
-                    y[idx][i] = -1
-                except ValueError:
-                    # Optimize molecule with MMFF94
-                    m = Chem.MolFromSmiles(smiles)
-                    m = Chem.AddHs(m)
-                    AllChem.EmbedMolecule(m)
-                    AllChem.MMFFOptimizeMolecule(m)
-
-                    x.append(m)
-                    ids.append(id_)
-                    c.append(m.GetConformer().GetPositions())
-                    y.append([0 for _ in n_targets])
-                    y[-1][i] = -1
-
-        # Filter and update maximum number of atoms
-        new_x, new_c, new_y = [], [], []
-        if self.max_atoms > 0:
-            for mol, coo, tar in zip(x, c, y):
-                if mol.GetNumAtoms() <= self.max_atoms:
-                    new_x.append(mol)
-                    new_c.append(coo)
-                    new_y.append(tar)
-
-            x = new_x
-            c = new_c
-            y = new_y
+                            tx.append(target)
+                            tc.append(targetc)
+                            x.append(m)
+                            c.append(m.GetConformer().GetPositions())
+                            y.append(value)
+                self.target_size = max([t.GetNumAtoms() for t in tx])
+                self.molecule_size = max([m.GetNumAtoms() for m in x])
 
         else:
-            for mol, tar in zip(x, y):
-                self.max_atoms = max(self.max_atoms, mol.GetNumAtoms())
+            for file, value in (("actives", True), ("decoys", False)):
+                with open(self.path + file + '_final.ism', 'r') as f:
+                    lines = f.readlines()
+                    lines = [x.strip().split(" ") for x in lines]
+                    for smiles, _, id_ in lines:
+                        # Optimize molecule with MMFF94
+                        m = Chem.MolFromSmiles(smiles)
+                        m = Chem.AddHs(m)
+                        AllChem.EmbedMolecule(m, maxAttempts=5000)
+                        AllChem.MMFFOptimizeMolecule(m)
+
+                        x.append(m)
+                        c.append(m.GetConformer().GetPositions())
+                        y.append(value)
+            self.molecule_size = max([m.GetNumAtoms() for m in x])
 
         self.mols, self.coords, self.target = np.array(x), np.array(c), np.array(y)
 
@@ -143,6 +130,24 @@ class Dataset(object):
         self.y = {"train": self.target[spl1:],
                   "valid": self.target[spl2:spl1],
                   "test": self.target[:spl2]}
+
+        if self.dataset == None:
+            self.targets, self.t_coords = np.array(tx), np.array(tc)
+
+            # Shuffle data
+            self.targets, self.t_coords = self.targets[idx], self.t_coords[idx]
+
+            # Split data
+            spl1 = int(len(self.mols) * 0.2)
+            spl2 = int(len(self.mols) * 0.1)
+
+            self.tx = {"train": self.targets[spl1:],
+                       "valid": self.targets[spl2:spl1],
+                       "test": self.targets[:spl2]}
+            self.tc = {"train": self.t_coords[spl1:],
+                       "valid": self.t_coords[spl2:spl1],
+                       "test": self.t_coords[:spl2]}
+        import pdb; pdb.set_trace()
 
     def save_dataset(self, path, pred=None, target="test", filename=None):
         mols = []

@@ -3,6 +3,8 @@ from rdkit import Chem
 from rdkit.Chem import rdmolops, rdmolfiles, AllChem
 import numpy as np
 import os
+import pickle as pkl
+from joblib import Parallel, delayed
 
 def one_hot(x, allowable_set):
     # If x is not in allowed set, use last index
@@ -46,7 +48,10 @@ class Dataset(object):
         self.use_num_hydrogen = True
 
         # Load data
-        self.load_dataset()
+        try:
+            self.reload_dataset(self.path + 'dataset.pkl')
+        except:
+            self.load_dataset()
 
         # Calculate number of features
         mp = MPGenerator([], [], [], 1,
@@ -71,55 +76,43 @@ class Dataset(object):
         if self.dataset is None:
             tx, tc = [], []
             for i, target_n in enumerate(next(os.walk(self.path))[1]):
-                target = rdmolfiles.MolFromPDBFile(self.path + target_n + '/receptor.pdb')
-                targetc = target.GetConformer().GetPositions()
+                try:
+                    target = rdmolfiles.MolFromPDBFile(self.path + target_n + '/receptor.pdb')
+                    targetc = target.GetConformer().GetPositions()
+                except AttributeError:
+                    print("Failed to load target: " + target_n)
+                    continue
                 for file, value in (("actives", True), ("decoys", False)):
                     with open(self.path + target_n + '/' + file + '_final.ism', 'r') as f:
                         lines = f.readlines()
-                        lines = [x.strip().split(" ") for x in lines]
-                        try:
-                            for smiles, _, id_ in lines:
-                                try:
-                                    # Optimize molecule with MMFF94
-                                    m = Chem.MolFromSmiles(smiles)
-                                    m = Chem.AddHs(m)
-                                    AllChem.EmbedMolecule(m)
-                                    AllChem.MMFFOptimizeMolecule(m)
+                        smiless = [x.strip().split(" ")[0] for x in lines]
+                        out = Parallel(n_jobs=4)(delayed(Dataset._load_molecule)(smile) for smile in smiless)
+                        x_, c_ = zip(*out)
+                        x.extend(x_)
+                        c.extend(c_)
+                        tx.extend([target] * len(x_))
+                        tc.extend([targetc] * len(x_))
+                        y.extend([value] * len(x_))
 
-                                    tx.append(target)
-                                    tc.append(targetc)
-                                    x.append(m)
-                                    c.append(m.GetConformer().GetPositions())
-                                    y.append(value)
-                                except:
-                                    print("Failed to optimize: " + smiles)
-                        except:
-                            import pdb; pdb.set_trace()
                 self.target_size = max([t.GetNumAtoms() for t in tx])
                 self.molecule_size = max([m.GetNumAtoms() for m in x])
-                import pdb; pdb.set_trace()
 
         else:
             for file, value in (("actives", True), ("decoys", False)):
                 with open(self.path + file + '_final.ism', 'r') as f:
                     lines = f.readlines()
-                    lines = [x.strip().split(" ") for x in lines]
-                    for smiles, _, id_ in lines:
-                        try:
-                            # Optimize molecule with MMFF94
-                            m = Chem.MolFromSmiles(smiles)
-                            m = Chem.AddHs(m)
-                            AllChem.EmbedMolecule(m)
-                            AllChem.MMFFOptimizeMolecule(m)
+                    smiless = [x.strip().split(" ")[0] for x in lines]
+                    out = Parallel(n_jobs=4)(delayed(Dataset._load_molecule)(smile) for smile in smiless)
+                    x, c = zip(*out)
+                    y = [value] * len(x)
 
-                            x.append(m)
-                            c.append(m.GetConformer().GetPositions())
-                            y.append(value)
-                        except:
-                            print("Failed to optimize: " + smiles)
             self.molecule_size = max([m.GetNumAtoms() for m in x])
 
         self.mols, self.coords, self.target = np.array(x), np.array(c), np.array(y)
+        pkl_dict = {'mols': self.mols,
+                    'coords': self.coords,
+                    'target': self.target}
+        pkl.dump(pkl_dict, open(self.path + "dataset.pkl", "wb"))
 
         # Shuffle data
         idx = np.random.permutation(len(self.mols))
@@ -141,6 +134,12 @@ class Dataset(object):
 
         if self.dataset is None:
             self.targets, self.t_coords = np.array(tx), np.array(tc)
+            pkl_dict = {'mols': np.array(x),
+                        'coords': np.array(c),
+                        'target': np.array(y),
+                        'targets': self.targets,
+                        't_coords': self.t_coords}
+            pkl.dump(pkl_dict, open(self.path + "dataset.pkl", "wb"))
 
             # Shuffle data
             self.targets, self.t_coords = self.targets[idx], self.t_coords[idx]
@@ -155,7 +154,43 @@ class Dataset(object):
             self.tc = {"train": self.t_coords[spl1:],
                        "valid": self.t_coords[spl2:spl1],
                        "test": self.t_coords[:spl2]}
-        import pdb; pdb.set_trace()
+    @staticmethod
+    def _load_molecule(smiles):
+        try:
+            # Optimize molecule with MMFF94
+            m = Chem.MolFromSmiles(smiles)
+            m = Chem.AddHs(m)
+            AllChem.EmbedMolecule(m)
+            AllChem.MMFFOptimizeMolecule(m)
+
+            return m, m.GetConformer().GetPositions()
+        except:
+            print("Failed to optimize: " + smiles)
+
+    def reload_dataset(self, path):
+        pkl_dict = pkl.load(open(path, 'rb'))
+        self.mols = pkl_dict['mols']
+        self.coords = pkl_dict['coords']
+        self.target = pkl_dict['target']
+        self.molecule_size = max([m.GetNumAtoms() for m in self.mols])
+
+        # Shuffle data
+        idx = np.random.permutation(len(self.mols))
+        self.mols, self.coords, self.target = self.mols[idx], self.coords[idx], self.target[idx]
+
+        # Split data
+        spl1 = int(len(self.mols) * 0.2)
+        spl2 = int(len(self.mols) * 0.1)
+
+        self.x = {"train": self.mols[spl1:],
+                  "valid": self.mols[spl2:spl1],
+                  "test": self.mols[:spl2]}
+        self.c = {"train": self.coords[spl1:],
+                  "valid": self.coords[spl2:spl1],
+                  "test": self.coords[:spl2]}
+        self.y = {"train": self.target[spl1:],
+                  "valid": self.target[spl2:spl1],
+                  "test": self.target[:spl2]}
 
     def save_dataset(self, path, pred=None, target="test", filename=None):
         mols = []
@@ -209,7 +244,7 @@ class Dataset(object):
 
     def set_features(self, use_atom_symbol=True, use_degree=True, use_hybridization=True, use_implicit_valence=True,
                      use_partial_charge=False, use_formal_charge=True, use_ring_size=True, use_hydrogen_bonding=True,
-                     use_acid_base=True, use_aromaticity=True, use_chirality=True, use_num_hydrogen=True):
+                     use_acid_base=True, use_aromaticity=True, use_chirality=True, use_num_hydrogen=True, **kwargs):
 
         self.use_atom_symbol = use_atom_symbol
         self.use_degree = use_degree
@@ -243,7 +278,7 @@ class Dataset(object):
     def generator(self, target, task=None):
         return MPGenerator(self.x[target], self.c[target], self.y[target], self.batch,
                            task=task if task is not None else self.task,
-                           num_atoms=self.max_atoms,
+                           num_atoms=self.molecule_size,
                            use_atom_symbol=self.use_atom_symbol,
                            use_degree=self.use_degree,
                            use_hybridization=self.use_hybridization,

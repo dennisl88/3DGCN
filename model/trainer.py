@@ -25,8 +25,8 @@ class Trainer(object):
 
         return text
 
-    def load_data(self, batch=128):
-        self.data = Dataset(batch=batch)
+    def load_data(self, dataset=None, batch=128):
+        self.data = Dataset(dataset=dataset, batch=batch)
 
         self.hyper["num_train"] = len(self.data.y["train"])
         self.hyper["num_val"] = len(self.data.y["valid"])
@@ -34,19 +34,12 @@ class Trainer(object):
         self.hyper["target_size"] = self.data.target_size
         self.hyper["molecule_size"] = self.data.molecule_size
         self.hyper["num_features"] = self.data.num_features
-        self.hyper["data_std"] = self.data.std
-        self.hyper["data_mean"] = self.data.mean
         self.hyper["task"] = self.data.task
         self.hyper["outputs"] = self.data.outputs
         self.hyper["batch"] = batch
 
-    def load_model(self, model):
-        self.model = getattr(m, model)(self.hyper)
-        self.model.summary()
-
     def fit(self, model, epoch, batch=128, fold=10, pooling="max", units_conv=128, units_dense=128, num_layers=2,
-            loss="mse", monitor="val_rmse", mode="min", use_multiprocessing=True, label="", **kwargs):
-
+            monitor="val_rmse", mode="min", use_multiprocessing=True, label="", *args, **kwargs):
         # 1. Generate CV folder
         now = datetime.now()
         base_path = "../../result/{}/{}/".format(model, self.hyper["dataset"])
@@ -57,12 +50,13 @@ class Trainer(object):
             start_time = time.time()
 
             # 2. Generate data
-            self.load_data(batch=batch)
+            self.load_data(dataset=self.hyper['dataset'], batch=batch)
             self.data.set_features(**kwargs)
             self.hyper["num_features"] = self.data.num_features
 
             # 3. Make model
-            self.load_model(model)
+            self.model = getattr(m, model)(*args, **self.hyper, **kwargs)
+            self.model.summary()
 
             # 4. Callbacks
             log_path = base_path + "{}_c{}_d{}_l{}_p{}_{}{}/".format(batch, units_conv, units_dense, num_layers,
@@ -81,7 +75,7 @@ class Trainer(object):
             # 5. Fit
             self.model.fit_generator(self.data.generator("train"), epochs=epoch,
                                      validation_data=self.data.generator("valid"), callbacks=callbacks,
-                                     use_multiprocessing=use_multiprocessing, workers=6)
+                                     use_multiprocessing=use_multiprocessing, workers=4)
             self.model.save_weights(tb_path + "best_weight.hdf5")
             self.hyper["train_time"] = time.time() - start_time
 

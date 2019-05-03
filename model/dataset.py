@@ -18,9 +18,9 @@ class Dataset(object):
     def __init__(self, dataset=None, batch=128):
         self.dataset = dataset
         if dataset == None:
-            self.path = "../../data/"
+            self.path = "../../small_data/"
         else:
-            self.path = "../../data/{0}/".format(dataset)
+            self.path = "../../small_data/{0}/".format(dataset)
         self.task = "binary"
         self.target_name = "active"
         self.target_size = 0
@@ -87,6 +87,7 @@ class Dataset(object):
                         lines = f.readlines()
                         smiless = [x.strip().split(" ")[0] for x in lines]
                         out = Parallel(n_jobs=4)(delayed(Dataset._load_molecule)(smile) for smile in smiless)
+                        out = filter(None, out)
                         x_, c_ = zip(*out)
                         x.extend(x_)
                         c.extend(c_)
@@ -103,8 +104,11 @@ class Dataset(object):
                     lines = f.readlines()
                     smiless = [x.strip().split(" ")[0] for x in lines]
                     out = Parallel(n_jobs=4)(delayed(Dataset._load_molecule)(smile) for smile in smiless)
-                    x, c = zip(*out)
-                    y = [value] * len(x)
+                    out = filter(None, out)
+                    x_, c_ = zip(*out)
+                    x.extend(x_)
+                    c.extend(c_)
+                    y.extend([value] * len(x_))
 
             self.molecule_size = max([m.GetNumAtoms() for m in x])
 
@@ -192,6 +196,21 @@ class Dataset(object):
                   "valid": self.target[spl2:spl1],
                   "test": self.target[:spl2]}
 
+        if self.dataset is None:
+            self.targets = pkl_dict['targets']
+            self.t_coords = pkl_dict['t_coords']
+            self.target_size = max([m.GetNumAtoms() for m in self.targets])
+
+            self.targets = self.targets[idx]
+            self.t_coords = self.t_coords[idx]
+
+            self.tx = {"train": self.targets[spl1:],
+                       "valid": self.targets[spl2:spl1],
+                       "test": self.targets[:spl2]}
+            self.tc = {"train": self.t_coords[spl1:],
+                       "valid": self.t_coords[spl2:spl1],
+                       "test": self.t_coords[:spl2]}
+
     def save_dataset(self, path, pred=None, target="test", filename=None):
         mols = []
         for idx, (x, c, y) in enumerate(zip(self.x[target], self.c[target], self.y[target])):
@@ -261,6 +280,7 @@ class Dataset(object):
 
         # Calculate number of features
         mp = MPGenerator([], [], [], 1,
+                         tx_set={}, tc_set={},
                          use_atom_symbol=self.use_atom_symbol,
                          use_degree=self.use_degree,
                          use_hybridization=self.use_hybridization,
@@ -277,8 +297,11 @@ class Dataset(object):
 
     def generator(self, target, task=None):
         return MPGenerator(self.x[target], self.c[target], self.y[target], self.batch,
+                           tx_set=self.tx[target],
+                           tc_set=self.tc[target],
                            task=task if task is not None else self.task,
-                           num_atoms=self.molecule_size,
+                           molecule_size=self.molecule_size,
+                           target_size=self.target_size,
                            use_atom_symbol=self.use_atom_symbol,
                            use_degree=self.use_degree,
                            use_hybridization=self.use_hybridization,
@@ -294,15 +317,16 @@ class Dataset(object):
 
 
 class MPGenerator(Sequence):
-    def __init__(self, x_set, c_set, y_set, batch, task="binary", num_atoms=0,
+    def __init__(self, x_set, c_set, y_set, batch, tx_set=(), tc_set=(), task="binary", molecule_size=0, target_size=0,
                  use_degree=True, use_hybridization=True, use_implicit_valence=True, use_partial_charge=False,
                  use_formal_charge=True, use_ring_size=True, use_hydrogen_bonding=True, use_acid_base=True,
                  use_aromaticity=True, use_chirality=True, use_num_hydrogen=True, use_atom_symbol=True):
-        self.x, self.c, self.y = x_set, c_set, y_set
+        self.x, self.c, self.y, self.tx, self.tc = x_set, c_set, y_set, tx_set, tc_set
 
         self.batch = batch
         self.task = task
-        self.num_atoms = num_atoms
+        self.molecule_size = molecule_size
+        self.target_size = target_size
 
         self.use_atom_symbol = use_atom_symbol
         self.use_degree = use_degree
@@ -332,19 +356,22 @@ class MPGenerator(Sequence):
         batch_c = self.c[idx * self.batch:(idx + 1) * self.batch]
         batch_y = self.y[idx * self.batch:(idx + 1) * self.batch]
 
-        if self.task == "category":
-            return self.tensorize(batch_x, batch_c), to_categorical(batch_y)
-        elif self.task == "binary":
-            return self.tensorize(batch_x, batch_c), np.array(batch_y, dtype=int)
-        elif self.task == "regression":
-            return self.tensorize(batch_x, batch_c), np.array(batch_y, dtype=float)
-        elif self.task == "input_only":
-            return self.tensorize(batch_x, batch_c)
+        mol_out = self.tensorize(batch_x, batch_c, self.molecule_size)
 
-    def tensorize(self, batch_x, batch_c):
-        atom_tensor = np.zeros((len(batch_x), self.num_atoms, self.get_num_features()))
-        adjm_tensor = np.zeros((len(batch_x), self.num_atoms, self.num_atoms))
-        posn_tensor = np.zeros((len(batch_x), self.num_atoms, self.num_atoms, 3))
+        if len(self.tx) > 0:
+            batch_tx = self.tx[idx * self.batch:(idx + 1) * self.batch]
+            batch_tc = self.tc[idx * self.batch:(idx + 1) * self.batch]
+            target_out = self.tensorize(batch_tx, batch_tc, self.target_size)
+            print(target_out)
+            print(mol_out)
+            return target_out + mol_out, np.array(batch_y, dtype=int)
+
+        return mol_out, np.array(batch_y, dtype=int)
+
+    def tensorize(self, batch_x, batch_c, size):
+        atom_tensor = np.zeros((len(batch_x), size, self.get_num_features()))
+        adjm_tensor = np.zeros((len(batch_x), size, size))
+        posn_tensor = np.zeros((len(batch_x), size, size, 3))
 
         for mol_idx, mol in enumerate(batch_x):
             Chem.RemoveHs(mol)

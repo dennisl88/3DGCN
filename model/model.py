@@ -47,24 +47,22 @@ def model_3DGCN(molecule_parameters, molecule_size, num_features, loss, outputs,
     return model
 
 
-def bi3DGCN(hyper):
-    outputs = hyper["outputs"]
-    loss = hyper["loss"]
-    hyper['target_parameters']['num_atoms'] = hyper['target_size']
-    hyper['molecule_parameters']['num_atoms'] = hyper['molecule_size']
+def bi3DGCN(molecule_parameters, molecule_size, target_parameters, target_size, num_features, loss, outputs, *args, **kwargs):
+    target_parameters['num_atoms'] = target_size
+    molecule_parameters['num_atoms'] = molecule_size
 
     def submodel(model_params):
         # Kipf adjacency, neighborhood mixing
         num_atoms = model_params["num_atoms"]
-        num_features = hyper["num_features"]
         units_conv = model_params["units_conv"]
         units_dense = model_params["units_dense"]
         num_layers = model_params["num_layers"]
         pooling = model_params["pooling"]
+        name = model_params["name"]
 
-        atoms = Input(name='atom_inputs', shape=(num_atoms, num_features))
-        adjms = Input(name='adjm_inputs', shape=(num_atoms, num_atoms))
-        dists = Input(name='coor_inputs', shape=(num_atoms, num_atoms, 3))
+        atoms = Input(name=name + '_atom_inputs', shape=(num_atoms, num_features))
+        adjms = Input(name=name + '_adjm_inputs', shape=(num_atoms, num_atoms))
+        dists = Input(name=name + '_coor_inputs', shape=(num_atoms, num_atoms, 3))
 
         sc, vc = GraphEmbed()([atoms, dists])
 
@@ -89,8 +87,8 @@ def bi3DGCN(hyper):
         out = Concatenate(axis=-1)([sc_out, vc_out])
         return (atoms, adjms, dists), out
 
-    target_in, target_out = submodel(hyper['target_parameters'])
-    molecule_in, molecule_out = submodel(hyper['molecule_parameters'])
+    target_in, target_out = submodel(target_parameters)
+    molecule_in, molecule_out = submodel(molecule_parameters)
 
     out = Concatenate(axis=-1)([target_out, molecule_out])
 

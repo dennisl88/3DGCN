@@ -95,10 +95,10 @@ class Trainer(object):
                 writer.writerow(self.hyper)
 
             # 8. Save data split and test results
-            for target in ["train", "valid", "test"]:
-                pred = self.model.predict_generator(self.data.generator(target, task="input_only"),
-                                                    use_multiprocessing=use_multiprocessing, workers=10)
-                self.data.save_dataset(tb_path, pred=pred, target=target)
+            # for target in ["train", "valid", "test"]:
+            #     pred = self.model.predict_generator(self.data.generator(target, task="input_only"),
+            #                                         use_multiprocessing=use_multiprocessing, workers=10)
+            #     self.data.save_dataset(tb_path, pred=pred, target=target)
 
         # 9. Save cross validation results
         header = ["train_roc", "valid_roc", "test_roc", "train_pr", "valid_pr", "test_pr"]

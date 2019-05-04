@@ -18,9 +18,9 @@ class Dataset(object):
     def __init__(self, dataset=None, batch=128):
         self.dataset = dataset
         if dataset == None:
-            self.path = "../../small_data/"
+            self.path = "../../data/"
         else:
-            self.path = "../../small_data/{0}/".format(dataset)
+            self.path = "../../data/{0}/".format(dataset)
         self.task = "binary"
         self.target_name = "active"
         self.target_size = 0
@@ -210,6 +210,9 @@ class Dataset(object):
             self.tc = {"train": self.t_coords[spl1:],
                        "valid": self.t_coords[spl2:spl1],
                        "test": self.t_coords[:spl2]}
+        else:
+            self.tx = {'train': [], 'valid': [], 'test': []}
+            self.tc = {'train': [], 'valid': [], 'test': []}
 
     def save_dataset(self, path, pred=None, target="test", filename=None):
         mols = []

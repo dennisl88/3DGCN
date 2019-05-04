@@ -73,6 +73,7 @@ class Trainer(object):
                           ReduceLROnPlateau(monitor="val_loss", factor=0.9, patience=10, min_lr=0.0005)]
 
             # 5. Fit
+
             self.model.fit_generator(self.data.generator("train"), epochs=epoch,
                                      validation_data=self.data.generator("valid"), callbacks=callbacks,
                                      use_multiprocessing=use_multiprocessing, workers=4)

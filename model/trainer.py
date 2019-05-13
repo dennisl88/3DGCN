@@ -37,6 +37,7 @@ class Trainer(object):
         self.hyper["task"] = self.data.task
         self.hyper["outputs"] = self.data.outputs
         self.hyper["batch"] = batch
+        print("finish loading data with batch size", batch)
 
     def fit(self, model, epoch, batch=128, fold=10, pooling="max", units_conv=128, units_dense=128, num_layers=2,
             monitor="val_rmse", mode="min", use_multiprocessing=True, label="", *args, **kwargs):

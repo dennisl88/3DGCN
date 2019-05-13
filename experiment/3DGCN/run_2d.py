@@ -5,10 +5,10 @@ from model.trainer import Trainer
 if __name__ == "__main__":
     trainer = Trainer(None)
 
-    target_parameters = {"units_conv": 128, "units_dense": 128, "pooling": "max", "num_layers": 2, "name": "target"}
-    molecule_parameters = {"units_conv": 128, "units_dense": 128, "pooling": "max", "num_layers": 2, "name": "molecule"}
+    target_parameters = {"units_conv": 32, "units_dense": 32, "pooling": "max", "num_layers": 0, "name": "target"}
+    molecule_parameters = {"units_conv": 32, "units_dense": 32, "pooling": "max", "num_layers": 0, "name": "molecule"}
 
-    hyperparameters = {"epoch": 20, "batch": 16, "fold": 10,  "loss": "binary_crossentropy", "monitor":
+    hyperparameters = {"epoch": 10, "batch": 32, "fold": 1,  "loss": "binary_crossentropy", "monitor":
                        "val_roc", "label": "", "target_parameters": target_parameters, "molecule_parameters": molecule_parameters}
 
     features = {"use_atom_symbol": True, "use_degree": True, "use_hybridization": True, "use_implicit_valence": True,
@@ -16,4 +16,4 @@ if __name__ == "__main__":
                 "use_acid_base": True, "use_aromaticity": True, "use_chirality": True, "use_num_hydrogen": True}
 
     # Baseline
-    trainer.fit('bi3DGCN', **hyperparameters, **features)
+    trainer.fit('model_2DGCN', **hyperparameters, **features)

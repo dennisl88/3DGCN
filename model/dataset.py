@@ -18,9 +18,9 @@ class Dataset(object):
     def __init__(self, dataset=None, batch=128):
         self.dataset = dataset
         if dataset == None:
-            self.path = "../../data/"
+            self.path = "../../tiny_data/"
         else:
-            self.path = "../../data/{0}/".format(dataset)
+            self.path = "../../tiny_data/{0}/".format(dataset)
         self.task = "binary"
         self.target_name = "active"
         self.target_size = 0
